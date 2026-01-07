@@ -1,0 +1,383 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// AUTHENTICATION & USERS
+// ==========================================
+
+enum UserRole {
+  ADMIN
+  LAB_STAFF
+  RECEPTION
+  SUPERUSER
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  firstName    String?
+  lastName     String?
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions     Session[]
+
+  @@index([username])
+  @@index([email])
+  @@index([role])
+  @@index([isActive])
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// ==========================================
+// CLINICAL MODELS
+// ==========================================
+
+model Patient {
+  id               String    @id @default(uuid())
+  patientNumber    String    @unique
+  firstName        String
+  lastName         String
+  dateOfBirth      DateTime?
+  gender           String?
+  phone            String?
+  email            String?
+  address          String?
+  city             String?
+  state            String?
+  zipCode          String?
+  emergencyContact String?
+  emergencyPhone   String?
+  medicalHistory   String?   @db.Text
+  allergies        String?   @db.Text
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  testRequests TestRequest[]
+  samples      Sample[]
+
+  @@index([patientNumber])
+  @@index([lastName, firstName])
+  @@index([phone])
+  @@index([email])
+  @@map("patients")
+}
+
+model TestRequest {
+  id               String   @id @default(uuid())
+  requestNumber    String   @unique
+  patientId        String
+  orderId          String?
+  requestDate      DateTime @default(now())
+  priority         String   @default("normal") // normal, urgent, stat
+  status           String   @default("pending") // pending, in_progress, completed, cancelled
+  clinicalNotes    String?  @db.Text
+  requestingDoctor String?
+  department       String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  patient          Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  order            Order?            @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  testRequestItems TestRequestItem[]
+  samples          Sample[]
+  labResults       LabResult[]
+
+  @@index([requestNumber])
+  @@index([patientId])
+  @@index([orderId])
+  @@index([requestDate])
+  @@index([status])
+  @@map("test_requests")
+}
+
+model TestRequestItem {
+  id            String   @id @default(uuid())
+  testRequestId String
+  orderItemId   String
+  status        String   @default("pending") // pending, collected, processing, completed, cancelled
+  notes         String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  testRequest TestRequest @relation(fields: [testRequestId], references: [id], onDelete: Cascade)
+  orderItem   OrderItem   @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  labResults  LabResult[]
+
+  @@index([testRequestId])
+  @@index([orderItemId])
+  @@index([status])
+  @@map("test_request_items")
+}
+
+model Sample {
+  id              String    @id @default(uuid())
+  sampleNumber    String    @unique
+  patientId       String
+  testRequestId   String
+  sampleType      String // blood, urine, stool, tissue, etc.
+  collectionDate  DateTime  @default(now())
+  collectionTime  DateTime?
+  collectedBy     String?
+  volume          String?
+  containerType   String?
+  status          String    @default("collected") // collected, received, processing, tested, disposed
+  condition       String? // good, hemolyzed, clotted, insufficient, etc.
+  storageLocation String?
+  notes           String?   @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  patient     Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  testRequest TestRequest @relation(fields: [testRequestId], references: [id], onDelete: Cascade)
+  labResults  LabResult[]
+
+  @@index([sampleNumber])
+  @@index([patientId])
+  @@index([testRequestId])
+  @@index([sampleType])
+  @@index([status])
+  @@index([collectionDate])
+  @@map("samples")
+}
+
+model LabParameter {
+  id                String   @id @default(uuid())
+  code              String   @unique
+  name              String
+  testCategory      String // hematology, biochemistry, microbiology, etc.
+  unit              String?
+  referenceRangeMin Float?
+  referenceRangeMax Float?
+  referenceText     String?  @db.Text
+  method            String?
+  isActive          Boolean  @default(true)
+  sortOrder         Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  labResultValues LabResultValue[]
+
+  @@index([code])
+  @@index([testCategory])
+  @@index([isActive])
+  @@map("lab_parameters")
+}
+
+model LabResult {
+  id                String    @id @default(uuid())
+  testRequestId     String
+  testRequestItemId String?
+  sampleId          String?
+  resultType        String // structured, investigation
+  status            String    @default("pending") // pending, in_progress, completed, verified, released
+  testedDate        DateTime?
+  testedBy          String?
+  verifiedDate      DateTime?
+  verifiedBy        String?
+  releasedDate      DateTime?
+  releasedBy        String?
+  notes             String?   @db.Text
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  testRequest         TestRequest          @relation(fields: [testRequestId], references: [id], onDelete: Cascade)
+  testRequestItem     TestRequestItem?     @relation(fields: [testRequestItemId], references: [id], onDelete: Cascade)
+  sample              Sample?              @relation(fields: [sampleId], references: [id], onDelete: SetNull)
+  labResultValues     LabResultValue[]
+  investigationResult InvestigationResult?
+
+  @@index([testRequestId])
+  @@index([testRequestItemId])
+  @@index([sampleId])
+  @@index([resultType])
+  @@index([status])
+  @@index([testedDate])
+  @@map("lab_results")
+}
+
+model LabResultValue {
+  id             String   @id @default(uuid())
+  labResultId    String
+  labParameterId String
+  value          String?
+  numericValue   Float?
+  textValue      String?  @db.Text
+  isAbnormal     Boolean  @default(false)
+  flag           String? // H (high), L (low), HH (critically high), LL (critically low)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  labResult    LabResult    @relation(fields: [labResultId], references: [id], onDelete: Cascade)
+  labParameter LabParameter @relation(fields: [labParameterId], references: [id], onDelete: Restrict)
+
+  @@index([labResultId])
+  @@index([labParameterId])
+  @@index([isAbnormal])
+  @@map("lab_result_values")
+}
+
+model InvestigationResult {
+  id                String   @id @default(uuid())
+  labResultId       String   @unique
+  investigationType String // radiology, pathology, special_tests
+  title             String
+  findings          String   @db.Text
+  impression        String?  @db.Text
+  recommendations   String?  @db.Text
+  images            String?  @db.Text // JSON array of image URLs
+  attachments       String?  @db.Text // JSON array of attachment URLs
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  labResult LabResult @relation(fields: [labResultId], references: [id], onDelete: Cascade)
+
+  @@index([labResultId])
+  @@index([investigationType])
+  @@map("investigation_results")
+}
+
+// ==========================================
+// INVENTORY & BILLING MODELS
+// ==========================================
+
+model InventoryItem {
+  id             String   @id @default(uuid())
+  itemCode       String   @unique
+  itemName       String
+  description    String?  @db.Text
+  category       String // lab_test, radiology, procedure, medication, supply, etc.
+  subCategory    String?
+  unitPrice      Float
+  cost           Float?
+  unit           String? // test, unit, mg, ml, etc.
+  taxable        Boolean  @default(true)
+  taxRate        Float    @default(0)
+  stockQuantity  Int      @default(0)
+  reorderLevel   Int?
+  isActive       Boolean  @default(true)
+  requiresSample Boolean  @default(false)
+  sampleType     String?
+  turnaroundTime Int? // in hours
+  department     String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  orderItems OrderItem[]
+
+  @@index([itemCode])
+  @@index([category])
+  @@index([isActive])
+  @@index([itemName])
+  @@map("inventory_items")
+}
+
+model Order {
+  id           String   @id @default(uuid())
+  orderNumber  String   @unique
+  orderDate    DateTime @default(now())
+  orderType    String // lab, radiology, pharmacy, outpatient, inpatient
+  customerType String // patient, corporate, insurance, walk_in
+  customerId   String? // Could be patient ID or corporate client ID
+  customerName String
+  status       String   @default("pending") // pending, confirmed, in_progress, completed, cancelled
+  subtotal     Float    @default(0)
+  discount     Float    @default(0)
+  tax          Float    @default(0)
+  totalAmount  Float    @default(0)
+  amountPaid   Float    @default(0)
+  balance      Float    @default(0)
+  notes        String?  @db.Text
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  orderItems   OrderItem[]
+  payments     Payment[]
+  testRequests TestRequest[]
+
+  @@index([orderNumber])
+  @@index([orderDate])
+  @@index([customerId])
+  @@index([status])
+  @@index([orderType])
+  @@map("orders")
+}
+
+model OrderItem {
+  id              String   @id @default(uuid())
+  orderId         String
+  inventoryItemId String
+  quantity        Int      @default(1)
+  unitPrice       Float
+  discount        Float    @default(0)
+  tax             Float    @default(0)
+  totalPrice      Float
+  status          String   @default("pending") // pending, processing, completed, cancelled
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  order            Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inventoryItem    InventoryItem     @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  testRequestItems TestRequestItem[]
+
+  @@index([orderId])
+  @@index([inventoryItemId])
+  @@index([status])
+  @@map("order_items")
+}
+
+model Payment {
+  id            String   @id @default(uuid())
+  orderId       String
+  paymentNumber String   @unique
+  paymentDate   DateTime @default(now())
+  paymentMethod String // cash, card, bank_transfer, insurance, mobile_money
+  amount        Float
+  reference     String?
+  transactionId String?
+  status        String   @default("completed") // pending, completed, failed, refunded
+  notes         String?  @db.Text
+  receivedBy    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([paymentNumber])
+  @@index([paymentDate])
+  @@index([paymentMethod])
+  @@index([status])
+  @@map("payments")
+}
